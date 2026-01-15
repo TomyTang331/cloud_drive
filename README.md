@@ -10,7 +10,7 @@ An open-source cloud storage system built with Rust (Axum backend) and modern fr
 - 📦 Batch file compression and download
 - 👥 User authentication and permission management (JWT)
 - 💾 SQLite database storage
-- 🎨 Modern frontend interface (Vite + React/Vue)
+- 🎨 Modern frontend interface (Vite + React)
 
 ## 🛠️ Tech Stack
 
@@ -23,7 +23,7 @@ An open-source cloud storage system built with Rust (Axum backend) and modern fr
 
 ### Frontend
 - **Build Tool**: Vite
-- **Framework**: [Fill in based on your actual setup, e.g., React/Vue]
+- **Framework**: React
 - **Language**: TypeScript
 
 ## 🚀 Quick Start
