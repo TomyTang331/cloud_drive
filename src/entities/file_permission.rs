@@ -9,11 +9,9 @@ pub struct Model {
     pub id: i32,
 
     /// File ID
-    #[sea_orm(indexed)]
     pub file_id: i32,
 
     /// Authorized user ID
-    #[sea_orm(indexed)]
     pub user_id: i32,
 
     /// Read permission

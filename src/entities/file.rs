@@ -9,18 +9,15 @@ pub struct Model {
     pub id: i32,
 
     /// File owner ID
-    #[sea_orm(indexed)]
     pub user_id: i32,
 
     /// File/folder name
     pub name: String,
 
     /// Relative path (relative to user root)
-    #[sea_orm(indexed)]
     pub path: String,
 
     /// Parent directory path
-    #[sea_orm(indexed)]
     pub parent_path: String,
 
     /// File type: file or folder
