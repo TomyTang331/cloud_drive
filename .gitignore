@@ -1,0 +1,12 @@
+# Backend
+/target
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Project specific
+/logs
+/storage
+/data
+config.toml

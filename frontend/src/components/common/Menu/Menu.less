@@ -1,0 +1,118 @@
+/* Menu System Styles */
+.menu-container {
+    position: fixed;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 1px rgba(0, 0, 0, 0.1);
+    padding: 4px;
+    min-width: 160px;
+    z-index: 1000;
+    animation: menuFadeIn 0.1s ease-out;
+    user-select: none;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+@keyframes menuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Menu Item */
+.menu-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+    color: #333;
+    font-size: 14px;
+    position: relative;
+    text-decoration: none;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.menu-item:hover,
+.menu-item.active {
+    background-color: #f0f0f0;
+}
+
+.menu-item.danger {
+    color: #d32f2f;
+}
+
+.menu-item.danger:hover {
+    background-color: #ffebee;
+}
+
+.menu-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Icon */
+.menu-item-icon {
+    width: 18px;
+    height: 18px;
+    margin-right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+}
+
+.menu-item.danger .menu-item-icon {
+    color: #d32f2f;
+}
+
+/* Label */
+.menu-item-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Shortcut / Hint */
+.menu-item-shortcut {
+    margin-left: 12px;
+    color: #999;
+    font-size: 12px;
+}
+
+/* Submenu Arrow */
+.menu-item-arrow {
+    margin-left: 8px;
+    color: #999;
+    font-size: 10px;
+}
+
+/* Separator */
+.menu-separator {
+    height: 1px;
+    background-color: #eee;
+    margin: 4px 0;
+}
+
+/* Submenu Positioning */
+.submenu-container {
+    position: absolute;
+    top: -4px;
+    left: 100%;
+    margin-left: 4px;
+}
+.menu-container.menu-no-icons .menu-item-icon {
+    display: none;
+}
