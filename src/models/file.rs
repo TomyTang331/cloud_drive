@@ -124,3 +124,31 @@ pub struct BatchDownloadRequest {
     /// List of file IDs to download (can be files or folders)
     pub file_ids: Vec<i32>,
 }
+
+/// Move file/folder request
+#[derive(Debug, Deserialize)]
+pub struct MoveRequest {
+    pub file_id: i32,
+    pub destination_path: String,
+}
+
+/// Copy file/folder request
+#[derive(Debug, Deserialize)]
+pub struct CopyRequest {
+    pub file_id: i32,
+    pub destination_path: String,
+}
+
+/// Calculate size request
+#[derive(Debug, Deserialize)]
+pub struct CalculateSizeRequest {
+    pub file_ids: Vec<i32>,
+}
+
+/// Calculate size response
+#[derive(Debug, Serialize)]
+pub struct CalculateSizeResponse {
+    pub total_size_bytes: i64,
+    pub file_count: usize,
+    pub folder_count: usize,
+}

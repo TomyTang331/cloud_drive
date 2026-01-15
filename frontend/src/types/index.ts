@@ -59,3 +59,28 @@ export interface FileListResponse {
 
 export type SortOption = 'name' | 'size' | 'date';
 export type CategoryOption = 'all' | 'recent' | 'images' | 'videos' | 'documents';
+
+export interface RenameRequest {
+    file_id: number;
+    new_name: string;
+}
+
+export interface MoveRequest {
+    file_id: number;
+    destination_path: string;
+}
+
+export interface CopyRequest {
+    file_id: number;
+    destination_path: string;
+}
+
+export interface CalculateSizeRequest {
+    file_ids: number[];
+}
+
+export interface CalculateSizeResponse {
+    total_size_bytes: number;
+    file_count: number;
+    folder_count: number;
+}

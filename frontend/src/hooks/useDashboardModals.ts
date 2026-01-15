@@ -48,6 +48,34 @@ export const useDashboardModals = () => {
         setItemToDelete(null);
     };
 
+    // Move Modal
+    const [showMoveModal, setShowMoveModal] = useState(false);
+    const [itemToMove, setItemToMove] = useState<FileItem | null>(null);
+
+    const openMoveModal = (file: FileItem) => {
+        setItemToMove(file);
+        setShowMoveModal(true);
+    };
+
+    const closeMoveModal = () => {
+        setShowMoveModal(false);
+        setItemToMove(null);
+    };
+
+    // Copy Modal
+    const [showCopyModal, setShowCopyModal] = useState(false);
+    const [itemToCopy, setItemToCopy] = useState<FileItem | null>(null);
+
+    const openCopyModal = (file: FileItem) => {
+        setItemToCopy(file);
+        setShowCopyModal(true);
+    };
+
+    const closeCopyModal = () => {
+        setShowCopyModal(false);
+        setItemToCopy(null);
+    };
+
     // Video Player Modal
     const [videoFile, setVideoFile] = useState<FileItem | null>(null);
 
@@ -66,6 +94,14 @@ export const useDashboardModals = () => {
         itemToDelete,
         openDeleteModal,
         closeDeleteModal,
+        showMoveModal,
+        itemToMove,
+        openMoveModal,
+        closeMoveModal,
+        showCopyModal,
+        itemToCopy,
+        openCopyModal,
+        closeCopyModal,
         previewFile,
         setPreviewFile,
         videoFile,

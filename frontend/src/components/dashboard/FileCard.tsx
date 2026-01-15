@@ -14,6 +14,9 @@ interface FileCardProps {
     onClick: (file: FileItem) => void;
     onContextMenu: (e: React.MouseEvent, file: FileItem) => void;
     onDelete: (file: FileItem) => void;
+    onRename: (file: FileItem) => void;
+    onMove: (file: FileItem) => void;
+    onCopy: (file: FileItem) => void;
 }
 
 const FileCard: React.FC<FileCardProps> = ({
@@ -23,7 +26,10 @@ const FileCard: React.FC<FileCardProps> = ({
     onSelect,
     onClick,
     onContextMenu,
-    onDelete
+    onDelete,
+    onRename,
+    onMove,
+    onCopy
 }) => {
     const { thumbnailUrl } = useThumbnail(file);
     const [showMenu, setShowMenu] = React.useState(false);
@@ -126,9 +132,9 @@ const FileCard: React.FC<FileCardProps> = ({
                     right: window.innerWidth - menuButtonRef.current.getBoundingClientRect().right
                 } : undefined}
                 items={[
-                    { label: 'Move to', onClick: () => { /* TODO: Implement Move */ } },
-                    { label: 'Copy to', onClick: () => { /* TODO: Implement Copy */ } },
-                    { label: 'Rename', onClick: () => { /* TODO: Implement Rename */ } },
+                    { label: 'Move to', onClick: () => { onMove(file); setShowMenu(false); } },
+                    { label: 'Copy to', onClick: () => { onCopy(file); setShowMenu(false); } },
+                    { label: 'Rename', onClick: () => { onRename(file); setShowMenu(false); } },
                     { label: 'Delete', onClick: () => onDelete(file), danger: true },
                     { label: 'Details', onClick: () => { /* TODO: Implement Details */ }, separator: true },
                 ]}

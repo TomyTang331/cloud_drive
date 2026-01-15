@@ -16,6 +16,9 @@ interface FileListProps {
     onContextMenu: (e: React.MouseEvent, file?: FileItem) => void;
     onDelete: (file: FileItem) => void;
     onFileUpload: (files: FileList) => void;
+    onRename: (file: FileItem) => void;
+    onMove: (file: FileItem) => void;
+    onCopy: (file: FileItem) => void;
 }
 
 const FileList: React.FC<FileListProps> = ({
@@ -30,7 +33,10 @@ const FileList: React.FC<FileListProps> = ({
     onFileClick,
     onContextMenu,
     onDelete,
-    onFileUpload
+    onFileUpload,
+    onRename,
+    onMove,
+    onCopy
 }) => {
     if (loading) {
         return (
@@ -117,6 +123,9 @@ const FileList: React.FC<FileListProps> = ({
                         onClick={onFileClick}
                         onContextMenu={onContextMenu}
                         onDelete={onDelete}
+                        onRename={onRename}
+                        onMove={onMove}
+                        onCopy={onCopy}
                     />
                 ))}
             </div>

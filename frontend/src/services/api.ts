@@ -7,7 +7,9 @@ import type {
     LoginData,
     RegisterData,
     StorageInfo,
-    UserProfile
+    UserProfile,
+    FileItem,
+    CalculateSizeResponse
 } from '../types';
 
 const API_BASE_URL = 'http://127.0.0.1:3000';
@@ -94,6 +96,22 @@ export const fileService = {
     // Batch download files
     batchDownload: (fileIds: number[]) =>
         api.post('/api/files/batch-download', { file_ids: fileIds }, { responseType: 'blob' }),
+
+    // Rename file
+    renameFile: (fileId: number, newName: string) =>
+        api.put<ApiResponse<FileItem>>('/api/files/rename', { file_id: fileId, new_name: newName }),
+
+    // Move file
+    moveFile: (fileId: number, destinationPath: string) =>
+        api.put<ApiResponse<FileItem>>('/api/files/move', { file_id: fileId, destination_path: destinationPath }),
+
+    // Copy file
+    copyFile: (fileId: number, destinationPath: string) =>
+        api.post<ApiResponse<FileItem>>('/api/files/copy', { file_id: fileId, destination_path: destinationPath }),
+
+    // Calculate total size of selected files/folders
+    calculateSize: (fileIds: number[]) =>
+        api.post<ApiResponse<CalculateSizeResponse>>('/api/files/size', { file_ids: fileIds }),
 };
 
 

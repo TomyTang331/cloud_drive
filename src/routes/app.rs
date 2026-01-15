@@ -44,6 +44,9 @@ pub fn create_routes(state: AppState) -> Router {
         .route("/api/files/upload", post(handlers::file::upload_file))
         .route("/api/files/folder", post(handlers::file::create_folder))
         .route("/api/files/rename", put(handlers::file::rename_file))
+        .route("/api/files/move", put(handlers::file::move_file))
+        .route("/api/files/copy", post(handlers::file::copy_file))
+        .route("/api/files/size", post(handlers::file::calculate_size))
         // Permission management routes (admin only)
         .route(
             "/api/files/permissions/grant",

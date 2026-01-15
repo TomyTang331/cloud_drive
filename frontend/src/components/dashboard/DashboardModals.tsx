@@ -3,6 +3,7 @@ import Modal from '../common/Modal';
 import ImagePreviewModal from './ImagePreviewModal';
 import VideoPlayerModal from './VideoPlayerModal';
 import FileDetailsModal from './FileDetailsModal';
+import FileSelectorModal from './FileSelectorModal';
 import type { FileItem } from '../../types';
 
 interface DashboardModalsProps {
@@ -26,6 +27,18 @@ interface DashboardModalsProps {
     itemToDelete: FileItem | null;
     onDelete: () => void;
 
+    // Move
+    showMoveModal: boolean;
+    closeMoveModal: () => void;
+    itemToMove: FileItem | null;
+    onMove: (destinationPath: string) => void;
+
+    // Copy
+    showCopyModal: boolean;
+    closeCopyModal: () => void;
+    itemToCopy: FileItem | null;
+    onCopy: (destinationPath: string) => void;
+
     // Preview
     previewFile: FileItem | null;
     setPreviewFile: (file: FileItem | null) => void;
@@ -37,8 +50,8 @@ interface DashboardModalsProps {
     setVideoFile: (file: FileItem | null) => void;
 
     // File Details
-    detailsFile: FileItem | null;
-    setDetailsFile: (file: FileItem | null) => void;
+    detailsFiles: FileItem[];
+    setDetailsFiles: (files: FileItem[]) => void;
 }
 
 const DashboardModals: React.FC<DashboardModalsProps> = ({
@@ -56,14 +69,22 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
     closeDeleteModal,
     itemToDelete,
     onDelete,
+    showMoveModal,
+    closeMoveModal,
+    itemToMove,
+    onMove,
+    showCopyModal,
+    closeCopyModal,
+    itemToCopy,
+    onCopy,
     previewFile,
     setPreviewFile,
     previewImages,
     onDeleteFile,
     videoFile,
     setVideoFile,
-    detailsFile,
-    setDetailsFile
+    detailsFiles,
+    setDetailsFiles
 }) => {
     return (
         <>
@@ -146,6 +167,25 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
                 </p>
             </Modal>
 
+            {/* Move File Modal */}
+            <FileSelectorModal
+                isOpen={showMoveModal}
+                onClose={closeMoveModal}
+                onSelect={onMove}
+                title={`Move "${itemToMove?.name}" to...`}
+                actionLabel="Move Here"
+                excludePath={itemToMove?.file_type === 'folder' ? itemToMove.path : undefined}
+            />
+
+            {/* Copy File Modal */}
+            <FileSelectorModal
+                isOpen={showCopyModal}
+                onClose={closeCopyModal}
+                onSelect={onCopy}
+                title={`Copy "${itemToCopy?.name}" to...`}
+                actionLabel="Copy Here"
+            />
+
             {/* Image Preview Modal */}
             <ImagePreviewModal
                 isOpen={!!previewFile}
@@ -184,9 +224,9 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
 
             {/* File Details Modal */}
             <FileDetailsModal
-                isOpen={!!detailsFile}
-                onClose={() => setDetailsFile(null)}
-                file={detailsFile}
+                isOpen={detailsFiles.length > 0}
+                onClose={() => setDetailsFiles([])}
+                files={detailsFiles}
             />
         </>
     );

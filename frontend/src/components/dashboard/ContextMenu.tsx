@@ -21,6 +21,8 @@ interface ContextMenuProps {
     onOpen: (file: FileItem) => void;
     onDownload: (file: FileItem) => void;
     onRename: (file: FileItem) => void;
+    onMove: (file: FileItem) => void;
+    onCopy: (file: FileItem) => void;
     onDelete: (file: FileItem) => void;
     onDetails: (file: FileItem) => void;
 }
@@ -38,6 +40,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     onOpen,
     onDownload,
     onRename,
+    onMove,
+    onCopy,
     onDelete,
     onDetails
 }) => {
@@ -96,7 +100,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <MenuItem
                 label="Copy"
                 icon={<IconCopy color={Colors.copy} />}
-                onClick={() => { /* TODO: Copy */ onClose(); }}
+                onClick={() => { onCopy(file); onClose(); }}
             />
             <MenuItem
                 label="Cut"
@@ -111,7 +115,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             <MenuItem
                 label="Move to"
                 icon={<IconMove color={Colors.move} />}
-                onClick={() => { /* TODO: Move */ onClose(); }}
+                onClick={() => { onMove(file); onClose(); }}
             />
 
             <MenuSeparator />

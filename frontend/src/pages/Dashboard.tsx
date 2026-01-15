@@ -30,6 +30,8 @@ const Dashboard: React.FC = () => {
         storageInfo,
         createFolder,
         renameFile,
+        moveFile,
+        copyFile,
         deleteFile,
         uploadFiles,
         batchDownloadFiles,
@@ -42,7 +44,7 @@ const Dashboard: React.FC = () => {
     const pendingUpdateRef = useRef(false);
 
     // File Details State
-    const [detailsFile, setDetailsFile] = useState<FileItem | null>(null);
+    const [detailsFiles, setDetailsFiles] = useState<FileItem[]>([]);
 
     // Custom Hooks
     const {
@@ -77,6 +79,14 @@ const Dashboard: React.FC = () => {
         itemToDelete,
         openDeleteModal,
         closeDeleteModal,
+        showMoveModal,
+        itemToMove,
+        openMoveModal,
+        closeMoveModal,
+        showCopyModal,
+        itemToCopy,
+        openCopyModal,
+        closeCopyModal,
         previewFile,
         setPreviewFile,
         videoFile,
@@ -201,6 +211,42 @@ const Dashboard: React.FC = () => {
         }
     };
 
+    // Move File
+    const handleMove = async (destinationPath: string) => {
+        if (!itemToMove) return;
+        const success = await moveFile(itemToMove, destinationPath);
+        if (success) {
+            closeMoveModal();
+        }
+    };
+
+    // Copy File
+    const handleCopy = async (destinationPath: string) => {
+        if (!itemToCopy) return;
+        const success = await copyFile(itemToCopy, destinationPath);
+        if (success) {
+            closeCopyModal();
+        }
+    };
+
+    // Details
+    const handleDetails = (file?: FileItem) => {
+        if (file) {
+            // If the file is part of the current selection and we have multiple items selected,
+            // show details for all selected items.
+            if (selectedIds.has(file.id) && selectedIds.size > 1) {
+                const selectedFiles = processedFiles.filter(f => selectedIds.has(f.id));
+                setDetailsFiles(selectedFiles);
+            } else {
+                // Otherwise just show details for the single file
+                setDetailsFiles([file]);
+            }
+        } else if (selectedIds.size > 0) {
+            const selectedFiles = processedFiles.filter(f => selectedIds.has(f.id));
+            setDetailsFiles(selectedFiles);
+        }
+    };
+
     // Download File
     const handleDownload = (file: FileItem) => {
         // If the file is part of the current selection and we have multiple items selected,
@@ -310,14 +356,23 @@ const Dashboard: React.FC = () => {
                             if (file) openRenameModal(file);
                         }
                     }}
-                    onDetails={() => {
+                    onDetails={() => handleDetails()}
+                    onMove={() => {
                         if (selectedIds.size === 1) {
                             const file = processedFiles.find(f => selectedIds.has(f.id));
-                            if (file) setDetailsFile(file);
+                            if (file) openMoveModal(file);
+                        } else {
+                            toast.info('Batch move coming soon');
                         }
                     }}
-                    onMove={() => toast.info('Move feature coming soon')}
-                    onCopy={() => toast.info('Copy feature coming soon')}
+                    onCopy={() => {
+                        if (selectedIds.size === 1) {
+                            const file = processedFiles.find(f => selectedIds.has(f.id));
+                            if (file) openCopyModal(file);
+                        } else {
+                            toast.info('Batch copy coming soon');
+                        }
+                    }}
                 />
 
                 <FileList
@@ -333,6 +388,9 @@ const Dashboard: React.FC = () => {
                     onContextMenu={handleContextMenu}
                     onDelete={handleDelete}
                     onFileUpload={handleFileUpload}
+                    onRename={openRenameModal}
+                    onMove={openMoveModal}
+                    onCopy={openCopyModal}
                 />
 
                 {/* Context Menu */}
@@ -350,8 +408,10 @@ const Dashboard: React.FC = () => {
                         onOpen={handleFileClick}
                         onDownload={handleDownload}
                         onRename={openRenameModal}
+                        onMove={openMoveModal}
+                        onCopy={openCopyModal}
                         onDelete={handleDelete}
-                        onDetails={(file) => setDetailsFile(file)}
+                        onDetails={handleDetails}
                     />
                 )}
 
@@ -383,6 +443,14 @@ const Dashboard: React.FC = () => {
                     closeDeleteModal={closeDeleteModal}
                     itemToDelete={itemToDelete}
                     onDelete={confirmDelete}
+                    showMoveModal={showMoveModal}
+                    closeMoveModal={closeMoveModal}
+                    itemToMove={itemToMove}
+                    onMove={handleMove}
+                    showCopyModal={showCopyModal}
+                    closeCopyModal={closeCopyModal}
+                    itemToCopy={itemToCopy}
+                    onCopy={handleCopy}
                     previewFile={previewFile}
                     setPreviewFile={(file) => {
                         setPreviewFile(file);
@@ -419,11 +487,11 @@ const Dashboard: React.FC = () => {
                             });
                         }
                     }}
-                    detailsFile={detailsFile}
-                    setDetailsFile={setDetailsFile}
+                    detailsFiles={detailsFiles}
+                    setDetailsFiles={setDetailsFiles}
                 />
-            </main >
-        </div >
+            </main>
+        </div>
     );
 };
 

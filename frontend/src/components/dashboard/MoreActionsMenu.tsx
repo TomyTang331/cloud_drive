@@ -50,7 +50,6 @@ const MoreActionsMenu: React.FC<MoreActionsMenuProps> = ({
             <MenuItem
                 label="Details"
                 onClick={() => { onDetails?.(); onClose(); }}
-                disabled={selectedCount !== 1}
             />
             <MenuSeparator />
             <MenuItem

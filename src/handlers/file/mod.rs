@@ -19,4 +19,6 @@ pub use upload::upload_file;
 
 pub use download::{batch_download_files, get_file};
 
-pub use operations::{create_folder, delete_file, list_files, rename_file};
+pub use operations::{
+    calculate_size, copy_file, create_folder, delete_file, list_files, move_file, rename_file,
+};

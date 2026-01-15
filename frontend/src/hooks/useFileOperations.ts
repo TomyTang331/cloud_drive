@@ -62,18 +62,45 @@ export const useFileOperations = () => {
         }
     };
 
-    const renameFile = async (_file: FileItem, newName: string) => {
-        if (!newName.trim()) return;
+    const renameFile = async (file: FileItem, newName: string) => {
+        if (!newName.trim()) return false;
         try {
-            // Placeholder for rename API
-
-            toast.info('Rename feature coming soon!');
+            await fileService.renameFile(file.id, newName);
+            toast.success('File renamed successfully');
             fetchFiles(currentPath);
             return true;
         } catch (error) {
             console.error('Failed to rename:', error);
             const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
             toast.error('Rename failed: ' + (message || 'Unknown error'));
+            return false;
+        }
+    };
+
+    const moveFile = async (file: FileItem, destinationPath: string) => {
+        try {
+            await fileService.moveFile(file.id, destinationPath);
+            toast.success('File moved successfully');
+            fetchFiles(currentPath);
+            return true;
+        } catch (error) {
+            console.error('Failed to move file:', error);
+            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
+            toast.error('Move failed: ' + (message || 'Unknown error'));
+            return false;
+        }
+    };
+
+    const copyFile = async (file: FileItem, destinationPath: string) => {
+        try {
+            await fileService.copyFile(file.id, destinationPath);
+            toast.success('File copied successfully');
+            fetchFiles(currentPath);
+            return true;
+        } catch (error) {
+            console.error('Failed to copy file:', error);
+            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
+            toast.error('Copy failed: ' + (message || 'Unknown error'));
             return false;
         }
     };
@@ -220,6 +247,8 @@ export const useFileOperations = () => {
         fetchFiles: () => fetchFiles(currentPath), // Expose a version that uses currentPath
         createFolder,
         renameFile,
+        moveFile,
+        copyFile,
         deleteFile,
         uploadFiles,
         batchDownloadFiles,

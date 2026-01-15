@@ -1,7 +1,8 @@
 use crate::{
     entities::{file, user},
     models::file::{
-        CreateFolderRequest, DeleteQuery, FileItem, FileListQuery, FileListResponse, FileType,
+        CalculateSizeRequest, CalculateSizeResponse, CopyRequest, CreateFolderRequest, DeleteQuery,
+        FileItem, FileListQuery, FileListResponse, FileType, MoveRequest,
     },
     utils::{
         file_utils, jwt, request_id,
@@ -10,9 +11,10 @@ use crate::{
     AppState,
 };
 use axum::{
-    extract::{Query, Request, State},
+    extract::{Json, Query, Request, State},
     http::StatusCode,
     response::Response,
+    Extension,
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::path::PathBuf;
@@ -398,12 +400,765 @@ pub async fn delete_file(
     )
 }
 
-/// Rename a file or folder (coming soon)
-pub async fn rename_file(State(_state): State<AppState>, _request: Request) -> Response {
+/// Rename a file or folder
+pub async fn rename_file(State(state): State<AppState>, request: Request) -> Response {
     let request_id = request_id::generate_request_id();
-    error_resp(
-        StatusCode::NOT_IMPLEMENTED,
+
+    let claims = match request.extensions().get::<jwt::Claims>() {
+        Some(c) => c,
+        None => {
+            return error_resp(
+                StatusCode::UNAUTHORIZED,
+                request_id,
+                "Authentication required",
+            )
+        }
+    };
+
+    let user_id = match claims.sub.parse::<i32>() {
+        Ok(id) => id,
+        Err(_) => {
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Invalid user ID",
+            )
+        }
+    };
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to read request body");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Failed to read request",
+            );
+        }
+    };
+
+    let req: crate::models::file::RenameRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to parse request");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Invalid request format",
+            );
+        }
+    };
+
+    if req.new_name.contains('/') || req.new_name.contains('\\') {
+        return error_resp(
+            StatusCode::BAD_REQUEST,
+            request_id,
+            "File name cannot contain path separators",
+        );
+    }
+
+    let user_entity = match user::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "User not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to query user");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let has_permission = match check_permission(
+        &state.db,
+        user_id,
+        &user_entity.role,
+        req.file_id,
+        Permission::Write,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Permission check failed");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Permission check failed",
+            );
+        }
+    };
+
+    if !has_permission {
+        return error_resp(
+            StatusCode::FORBIDDEN,
+            request_id,
+            "You don't have permission to rename this file",
+        );
+    }
+
+    let file_entity = match file::Entity::find_by_id(req.file_id).one(&state.db).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "File not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Database error");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let old_path = file_entity.path.clone();
+    let parent_path = file_entity.parent_path.clone();
+    let new_path = format!("{}/{}", parent_path.trim_end_matches('/'), req.new_name);
+
+    if new_path != old_path {
+        if let Ok(Some(_)) = file::Entity::find()
+            .filter(file::Column::UserId.eq(user_id))
+            .filter(file::Column::Path.eq(&new_path))
+            .one(&state.db)
+            .await
+        {
+            return error_resp(
+                StatusCode::CONFLICT,
+                request_id,
+                "A file with this name already exists",
+            );
+        }
+    }
+
+    let storage_root = state.config.get_storage_dir();
+    let old_physical = PathBuf::from(&file_entity.storage_path);
+    let new_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+        .join(new_path.trim_start_matches('/'));
+
+    if let Err(e) = std::fs::rename(&old_physical, &new_physical) {
+        tracing::error!(request_id = %request_id, error = ?e, "Failed to rename physical file");
+        return error_resp(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            request_id,
+            "Failed to rename file",
+        );
+    }
+
+    let mut active_model: file::ActiveModel = file_entity.clone().into();
+    active_model.name = Set(req.new_name.clone());
+    active_model.path = Set(new_path.clone());
+    active_model.storage_path = Set(new_physical.to_string_lossy().to_string());
+    active_model.updated_at = Set(chrono::Utc::now().naive_utc());
+
+    let updated_file = match active_model.update(&state.db).await {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to update database");
+            let _ = std::fs::rename(&new_physical, &old_physical);
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    // Update child paths for folders
+    if file_entity.file_type == "folder" {
+        if let Ok(children) =
+            super::helpers::get_folder_files_recursive(&state.db, &old_path, user_id).await
+        {
+            for child in children {
+                if child.id == updated_file.id {
+                    continue;
+                }
+
+                let new_child_path = child.path.replacen(&old_path, &new_path, 1);
+                let new_child_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+                    .join(new_child_path.trim_start_matches('/'));
+
+                let mut child_active: file::ActiveModel = child.into();
+                child_active.path = Set(new_child_path);
+                child_active.storage_path = Set(new_child_physical.to_string_lossy().to_string());
+                child_active.updated_at = Set(chrono::Utc::now().naive_utc());
+
+                let _ = child_active.update(&state.db).await;
+            }
+        }
+    }
+
+    tracing::info!(request_id = %request_id, file_id = updated_file.id, "File renamed successfully");
+    do_json_detail_resp(
+        StatusCode::OK,
         request_id,
-        "Rename feature coming soon",
+        "File renamed successfully",
+        Some(updated_file),
+    )
+}
+
+/// Move a file or folder to a different directory
+pub async fn move_file(State(state): State<AppState>, request: Request) -> Response {
+    let request_id = request_id::generate_request_id();
+
+    let claims = match request.extensions().get::<jwt::Claims>() {
+        Some(c) => c,
+        None => {
+            return error_resp(
+                StatusCode::UNAUTHORIZED,
+                request_id,
+                "Authentication required",
+            )
+        }
+    };
+
+    let user_id = match claims.sub.parse::<i32>() {
+        Ok(id) => id,
+        Err(_) => {
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Invalid user ID",
+            )
+        }
+    };
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to read request body");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Failed to read request",
+            );
+        }
+    };
+
+    let req: MoveRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to parse request");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Invalid request format",
+            );
+        }
+    };
+
+    let dest_path = match file_utils::sanitize_path(&req.destination_path) {
+        Ok(p) => p,
+        Err(e) => return error_resp(StatusCode::BAD_REQUEST, request_id, &e.to_string()),
+    };
+
+    let user_entity = match user::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "User not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to query user");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let has_permission = match check_permission(
+        &state.db,
+        user_id,
+        &user_entity.role,
+        req.file_id,
+        Permission::Write,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Permission check failed");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Permission check failed",
+            );
+        }
+    };
+
+    if !has_permission {
+        return error_resp(
+            StatusCode::FORBIDDEN,
+            request_id,
+            "You don't have permission to move this file",
+        );
+    }
+
+    let file_entity = match file::Entity::find_by_id(req.file_id).one(&state.db).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "File not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Database error");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let old_path = file_entity.path.clone();
+    let new_path = format!("{}/{}", dest_path.trim_end_matches('/'), file_entity.name);
+
+    if let Ok(Some(_)) = file::Entity::find()
+        .filter(file::Column::UserId.eq(user_id))
+        .filter(file::Column::Path.eq(&new_path))
+        .one(&state.db)
+        .await
+    {
+        return error_resp(
+            StatusCode::CONFLICT,
+            request_id,
+            "A file with this name already exists in destination",
+        );
+    }
+
+    let storage_root = state.config.get_storage_dir();
+    let old_physical = PathBuf::from(&file_entity.storage_path);
+    let new_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+        .join(new_path.trim_start_matches('/'));
+
+    if let Some(parent) = new_physical.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to create destination directory");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Failed to create destination directory",
+            );
+        }
+    }
+
+    if let Err(e) = std::fs::rename(&old_physical, &new_physical) {
+        tracing::error!(request_id = %request_id, error = ?e, "Failed to move physical file");
+        return error_resp(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            request_id,
+            "Failed to move file",
+        );
+    }
+
+    let mut active_model: file::ActiveModel = file_entity.clone().into();
+    active_model.path = Set(new_path.clone());
+    active_model.parent_path = Set(dest_path.clone());
+    active_model.storage_path = Set(new_physical.to_string_lossy().to_string());
+    active_model.updated_at = Set(chrono::Utc::now().naive_utc());
+
+    let updated_file = match active_model.update(&state.db).await {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to update database");
+            let _ = std::fs::rename(&new_physical, &old_physical);
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    // Update child paths for folders
+    if file_entity.file_type == "folder" {
+        if let Ok(children) =
+            super::helpers::get_folder_files_recursive(&state.db, &old_path, user_id).await
+        {
+            for child in children {
+                if child.id == updated_file.id {
+                    continue;
+                }
+
+                let new_child_path = child.path.replacen(&old_path, &new_path, 1);
+                let new_child_parent = if let Some(idx) = new_child_path.rfind('/') {
+                    new_child_path[..idx].to_string()
+                } else {
+                    "/".to_string()
+                };
+                let new_child_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+                    .join(new_child_path.trim_start_matches('/'));
+
+                let mut child_active: file::ActiveModel = child.into();
+                child_active.path = Set(new_child_path);
+                child_active.parent_path = Set(new_child_parent);
+                child_active.storage_path = Set(new_child_physical.to_string_lossy().to_string());
+                child_active.updated_at = Set(chrono::Utc::now().naive_utc());
+
+                let _ = child_active.update(&state.db).await;
+            }
+        }
+    }
+
+    tracing::info!(request_id = %request_id, file_id = updated_file.id, "File moved successfully");
+    do_json_detail_resp(
+        StatusCode::OK,
+        request_id,
+        "File moved successfully",
+        Some(updated_file),
+    )
+}
+
+/// Copy a file or folder to a different directory
+pub async fn copy_file(State(state): State<AppState>, request: Request) -> Response {
+    let request_id = request_id::generate_request_id();
+
+    let claims = match request.extensions().get::<jwt::Claims>() {
+        Some(c) => c,
+        None => {
+            return error_resp(
+                StatusCode::UNAUTHORIZED,
+                request_id,
+                "Authentication required",
+            )
+        }
+    };
+
+    let user_id = match claims.sub.parse::<i32>() {
+        Ok(id) => id,
+        Err(_) => {
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Invalid user ID",
+            )
+        }
+    };
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to read request body");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Failed to read request",
+            );
+        }
+    };
+
+    let req: CopyRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to parse request");
+            return error_resp(
+                StatusCode::BAD_REQUEST,
+                request_id,
+                "Invalid request format",
+            );
+        }
+    };
+
+    let dest_path = match file_utils::sanitize_path(&req.destination_path) {
+        Ok(p) => p,
+        Err(e) => return error_resp(StatusCode::BAD_REQUEST, request_id, &e.to_string()),
+    };
+
+    let user_entity = match user::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "User not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to query user");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let has_permission = match check_permission(
+        &state.db,
+        user_id,
+        &user_entity.role,
+        req.file_id,
+        Permission::Read,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Permission check failed");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Permission check failed",
+            );
+        }
+    };
+
+    if !has_permission {
+        return error_resp(
+            StatusCode::FORBIDDEN,
+            request_id,
+            "You don't have permission to copy this file",
+        );
+    }
+
+    let file_entity = match file::Entity::find_by_id(req.file_id).one(&state.db).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return error_resp(StatusCode::NOT_FOUND, request_id, "File not found"),
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Database error");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let storage_root = state.config.get_storage_dir();
+
+    let unique_filename = match super::helpers::generate_unique_filename(
+        &file_entity.name,
+        user_id,
+        &dest_path,
+        &state.db,
+    )
+    .await
+    {
+        Ok(name) => name,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to generate unique filename");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Failed to generate unique filename",
+            );
+        }
+    };
+
+    let new_path = format!("{}/{}", dest_path.trim_end_matches('/'), unique_filename);
+    let src_physical = PathBuf::from(&file_entity.storage_path);
+    let dest_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+        .join(new_path.trim_start_matches('/'));
+
+    if let Some(parent) = dest_physical.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to create destination directory");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Failed to create destination directory",
+            );
+        }
+    }
+
+    let copy_result = if file_entity.file_type == "folder" {
+        copy_dir_recursive(&src_physical, &dest_physical)
+    } else {
+        std::fs::copy(&src_physical, &dest_physical).map(|_| ())
+    };
+
+    if let Err(e) = copy_result {
+        tracing::error!(request_id = %request_id, error = ?e, "Failed to copy physical file");
+        return error_resp(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            request_id,
+            "Failed to copy file",
+        );
+    }
+
+    let now = chrono::Utc::now().naive_utc();
+    let new_file = file::ActiveModel {
+        user_id: Set(user_id),
+        name: Set(unique_filename.clone()),
+        path: Set(new_path.clone()),
+        parent_path: Set(dest_path.clone()),
+        file_type: Set(file_entity.file_type.clone()),
+        mime_type: Set(file_entity.mime_type.clone()),
+        size_bytes: Set(file_entity.size_bytes),
+        storage_path: Set(dest_physical.to_string_lossy().to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    };
+
+    let created_file = match new_file.insert(&state.db).await {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to create database record");
+            let _ = if file_entity.file_type == "folder" {
+                std::fs::remove_dir_all(&dest_physical)
+            } else {
+                std::fs::remove_file(&dest_physical)
+            };
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    // Copy child records for folders
+    if file_entity.file_type == "folder" {
+        if let Ok(children) =
+            super::helpers::get_folder_files_recursive(&state.db, &file_entity.path, user_id).await
+        {
+            for child in children {
+                if child.id == file_entity.id {
+                    continue;
+                }
+
+                let relative_path = child.path.replacen(&file_entity.path, "", 1);
+                let new_child_path = format!("{}{}", new_path, relative_path);
+                let new_child_parent = if let Some(idx) = new_child_path.rfind('/') {
+                    new_child_path[..idx].to_string()
+                } else {
+                    "/".to_string()
+                };
+                let new_child_physical = file_utils::get_user_storage_path(&storage_root, user_id)
+                    .join(new_child_path.trim_start_matches('/'));
+
+                let new_child = file::ActiveModel {
+                    user_id: Set(user_id),
+                    name: Set(child.name.clone()),
+                    path: Set(new_child_path),
+                    parent_path: Set(new_child_parent),
+                    file_type: Set(child.file_type.clone()),
+                    mime_type: Set(child.mime_type.clone()),
+                    size_bytes: Set(child.size_bytes),
+                    storage_path: Set(new_child_physical.to_string_lossy().to_string()),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                    ..Default::default()
+                };
+
+                let _ = new_child.insert(&state.db).await;
+            }
+        }
+    }
+
+    tracing::info!(request_id = %request_id, file_id = created_file.id, "File copied successfully");
+    do_json_detail_resp(
+        StatusCode::CREATED,
+        request_id,
+        "File copied successfully",
+        Some(created_file),
+    )
+}
+
+/// Recursively copy a directory and all its contents
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Calculate total size of selected files/folders
+pub async fn calculate_size(
+    State(state): State<AppState>,
+    Extension(claims): Extension<jwt::Claims>,
+    Json(payload): Json<CalculateSizeRequest>,
+) -> Response {
+    let request_id = request_id::generate_request_id();
+
+    let user_id = match claims.sub.parse::<i32>() {
+        Ok(id) => id,
+        Err(_) => {
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Invalid user ID",
+            )
+        }
+    };
+
+    let db = &state.db;
+
+    let user_entity = match user::Entity::find_by_id(user_id).one(db).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return error_resp(StatusCode::NOT_FOUND, request_id, "User not found");
+        }
+        Err(e) => {
+            tracing::error!(request_id = %request_id, error = ?e, "Failed to query user");
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Database error",
+            );
+        }
+    };
+
+    let mut total_size: i64 = 0;
+    let mut file_count: usize = 0;
+    let mut folder_count: usize = 0;
+
+    for file_id in payload.file_ids {
+        let file = match file::Entity::find_by_id(file_id).one(db).await {
+            Ok(Some(f)) => f,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::error!(request_id = %request_id, error = ?e, "Database query failed");
+                return error_resp(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    request_id,
+                    "Database error",
+                );
+            }
+        };
+
+        // Skip files without read permission
+        if file.user_id != user_id {
+            match check_permission(db, user_id, &user_entity.role, file.id, Permission::Read).await
+            {
+                Ok(false) | Err(_) => continue,
+                Ok(true) => {}
+            }
+        }
+
+        if file.file_type == "file" {
+            total_size += file.size_bytes.unwrap_or(0);
+            file_count += 1;
+        } else {
+            folder_count += 1;
+            match super::helpers::get_folder_files_recursive(db, &file.path, user_id).await {
+                Ok(files) => {
+                    let size = super::helpers::calculate_folder_size(&files);
+                    let count = files.iter().filter(|f| f.file_type == "file").count();
+                    total_size += size;
+                    file_count += count;
+                }
+                Err(e) => {
+                    tracing::error!(request_id = %request_id, error = ?e, "Failed to get folder contents");
+                    return error_resp(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        request_id,
+                        "Failed to calculate folder size",
+                    );
+                }
+            }
+        }
+    }
+
+    do_json_detail_resp(
+        StatusCode::OK,
+        request_id,
+        "Size calculated successfully",
+        Some(CalculateSizeResponse {
+            total_size_bytes: total_size,
+            file_count,
+            folder_count,
+        }),
     )
 }
