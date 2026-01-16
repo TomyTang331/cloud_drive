@@ -2,7 +2,6 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, Statement};
 use std::collections::HashMap;
 use std::time::Instant;
 
-// Constants
 const TABLE_FILES: &str = "files";
 const TABLE_FILE_PERMISSIONS: &str = "file_permissions";
 const TABLE_USERS: &str = "users";
@@ -27,6 +26,8 @@ pub async fn create_composite_indexes(db: &DatabaseConnection) -> Result<(), DbE
     tracing::info!("Managing database indexes...");
 
     let mut files_indexes = HashMap::new();
+
+    // User + parent path for directory listings
     files_indexes.insert(
         INDEX_FILES_USER_PARENT.to_string(),
         format!(
@@ -34,11 +35,61 @@ pub async fn create_composite_indexes(db: &DatabaseConnection) -> Result<(), DbE
             INDEX_FILES_USER_PARENT, TABLE_FILES, FIELD_USER_ID, FIELD_PARENT_PATH
         ),
     );
+
+    // Unique index for file lookups
     files_indexes.insert(
         INDEX_FILES_USER_PATH.to_string(),
         format!(
             "CREATE UNIQUE INDEX {} ON {}({}, {})",
             INDEX_FILES_USER_PATH, TABLE_FILES, FIELD_USER_ID, FIELD_PATH
+        ),
+    );
+
+    // Filter by file type
+    files_indexes.insert(
+        "idx_files_user_parent_type".to_string(),
+        format!(
+            "CREATE INDEX idx_files_user_parent_type ON {}({}, {}, file_type)",
+            TABLE_FILES, FIELD_USER_ID, FIELD_PARENT_PATH
+        ),
+    );
+
+    // Case-insensitive name search
+    files_indexes.insert(
+        "idx_files_name_search".to_string(),
+        format!(
+            "CREATE INDEX idx_files_name_search ON {}({}, name COLLATE NOCASE)",
+            TABLE_FILES, FIELD_USER_ID
+        ),
+    );
+
+    // Recent files sorted by creation time
+    files_indexes.insert(
+        "idx_files_recent".to_string(),
+        format!(
+            "CREATE INDEX idx_files_recent ON {}({}, created_at DESC) WHERE file_type = 'file'",
+            TABLE_FILES, FIELD_USER_ID
+        ),
+    );
+
+    // Files sorted by size
+    files_indexes.insert(
+        "idx_files_size".to_string(),
+        "CREATE INDEX idx_files_size ON files(user_id, size_bytes DESC) WHERE size_bytes IS NOT NULL AND file_type = 'file'".to_string(),
+    );
+
+    // Filter by MIME type
+    files_indexes.insert(
+        "idx_files_mime_type".to_string(),
+        "CREATE INDEX idx_files_mime_type ON files(user_id, mime_type) WHERE file_type = 'file' AND mime_type IS NOT NULL".to_string(),
+    );
+
+    // Files sorted by modification time
+    files_indexes.insert(
+        "idx_files_updated".to_string(),
+        format!(
+            "CREATE INDEX idx_files_updated ON {}({}, updated_at DESC)",
+            TABLE_FILES, FIELD_USER_ID
         ),
     );
 
@@ -166,6 +217,13 @@ pub async fn drop_composite_indexes(db: &DatabaseConnection) -> Result<(), DbErr
     drop_index(db, INDEX_FILES_USER_PARENT).await?;
     drop_index(db, INDEX_FILES_USER_PATH).await?;
     drop_index(db, INDEX_PERMISSIONS_FILE_USER).await?;
+
+    drop_index(db, "idx_files_user_parent_type").await?;
+    drop_index(db, "idx_files_name_search").await?;
+    drop_index(db, "idx_files_recent").await?;
+    drop_index(db, "idx_files_size").await?;
+    drop_index(db, "idx_files_mime_type").await?;
+    drop_index(db, "idx_files_updated").await?;
 
     tracing::info!("All composite indexes dropped");
     Ok(())

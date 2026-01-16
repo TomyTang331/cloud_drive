@@ -167,6 +167,7 @@ async fn create_file_db_record(
     physical_path: &PathBuf,
     content_type: Option<String>,
     size_bytes: i64,
+    file_hash: Option<String>,
     db: &sea_orm::DatabaseConnection,
 ) -> Result<file::Model, String> {
     let now = chrono::Utc::now().naive_utc();
@@ -179,6 +180,8 @@ async fn create_file_db_record(
         mime_type: Set(content_type),
         size_bytes: Set(Some(size_bytes)),
         storage_path: Set(physical_path.to_string_lossy().to_string()),
+        file_hash: Set(file_hash),
+        ref_count: Set(1),
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
@@ -192,7 +195,7 @@ async fn create_file_db_record(
     })
 }
 
-/// Process complete file upload workflow
+/// Process complete file upload workflow with async deduplitation
 async fn process_file_upload(
     ctx: &UploadContext,
     upload_data: FileUploadData,
@@ -202,13 +205,11 @@ async fn process_file_upload(
     let (unique_filename, file_path, physical_path) =
         prepare_file_path(ctx, &upload_data.file_name, &upload_data.upload_path, db).await?;
 
-    // Ensure directory structure
-    ensure_directory_structure(&physical_path, ctx)?;
-
     // Save file to disk
+    ensure_directory_structure(&physical_path, ctx)?;
     let size_bytes = save_file_to_disk(&physical_path, upload_data.data, &ctx.request_id).await?;
 
-    // Create database record
+    // Create database record immediately (hash will be calculated in background)
     let file_model = create_file_db_record(
         ctx,
         unique_filename.clone(),
@@ -217,6 +218,7 @@ async fn process_file_upload(
         &physical_path,
         upload_data.content_type,
         size_bytes,
+        None, // Hash calculated asynchronously
         db,
     )
     .await?;
@@ -225,10 +227,136 @@ async fn process_file_upload(
         request_id = %ctx.request_id,
         file_id = file_model.id,
         filename = %unique_filename,
-        "File uploaded successfully"
+        size_bytes = size_bytes,
+        "File uploaded successfully, hash calculation queued"
     );
 
+    // Spawn background task for hash calculation and deduplication
+    let file_id = file_model.id;
+    let physical_path_clone = physical_path.clone();
+    let db_clone = db.clone();
+    let user_id = ctx.user_id;
+    let request_id = ctx.request_id.clone();
+
+    tokio::spawn(async move {
+        tracing::debug!(
+            request_id = %request_id,
+            file_id = file_id,
+            "Starting background hash calculation"
+        );
+
+        if let Err(e) = calculate_and_deduplicate(
+            file_id,
+            user_id,
+            &physical_path_clone,
+            &db_clone,
+            &request_id,
+        )
+        .await
+        {
+            tracing::error!(
+                request_id = %request_id,
+                file_id = file_id,
+                error = ?e,
+                "Background hash calculation failed"
+            );
+        }
+    });
+
     Ok(file_model)
+}
+
+/// Background task to calculate hash and handle deduplication
+async fn calculate_and_deduplicate(
+    file_id: i32,
+    user_id: i32,
+    physical_path: &std::path::PathBuf,
+    db: &sea_orm::DatabaseConnection,
+    request_id: &str,
+) -> Result<(), String> {
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    // Calculate file hash
+    let file_hash = match crate::services::deduplication::calculate_file_hash(physical_path).await {
+        Ok(hash) => {
+            tracing::info!(
+                request_id = %request_id,
+                file_id = file_id,
+                hash = %hash,
+                "File hash calculated"
+            );
+            hash
+        }
+        Err(e) => {
+            tracing::warn!(
+                request_id = %request_id,
+                file_id = file_id,
+                error = ?e,
+                "Hash calculation failed"
+            );
+            return Err(format!("Hash failed: {:?}", e));
+        }
+    };
+
+    // Get current file
+    let current_file = file::Entity::find_by_id(file_id)
+        .one(db)
+        .await
+        .map_err(|e| format!("DB error: {:?}", e))?
+        .ok_or("File not found")?;
+
+    // Check for duplicates
+    match crate::services::deduplication::find_duplicate_file(db, &file_hash, user_id).await {
+        Ok(Some(existing)) if existing.id != file_id => {
+            tracing::info!(
+                request_id = %request_id,
+                file_id = file_id,
+                existing_id = existing.id,
+                "Duplicate found, deduplicating"
+            );
+
+            // Update current file to use existing storage
+            let mut active: file::ActiveModel = current_file.into();
+            active.storage_path = Set(existing.storage_path.clone());
+            active.file_hash = Set(Some(file_hash));
+            active.ref_count = Set(existing.ref_count + 1);
+            active
+                .update(db)
+                .await
+                .map_err(|e| format!("Update failed: {:?}", e))?;
+
+            // Increment existing file ref count
+            let mut existing_active: file::ActiveModel = existing.into();
+            existing_active.ref_count = Set(existing_active.ref_count.unwrap() + 1);
+            existing_active
+                .update(db)
+                .await
+                .map_err(|e| format!("Ref update failed: {:?}", e))?;
+
+            // Delete duplicate physical file
+            if let Err(e) = tokio::fs::remove_file(physical_path).await {
+                tracing::warn!(request_id = %request_id, error = ?e, "Failed to delete duplicate");
+            }
+
+            tracing::info!(request_id = %request_id, file_id = file_id, "Deduplication completed");
+        }
+        Ok(_) => {
+            // No duplicate, just update hash
+            let mut active: file::ActiveModel = current_file.into();
+            active.file_hash = Set(Some(file_hash));
+            active
+                .update(db)
+                .await
+                .map_err(|e| format!("Update failed: {:?}", e))?;
+
+            tracing::debug!(request_id = %request_id, file_id = file_id, "Hash updated");
+        }
+        Err(e) => {
+            tracing::warn!(request_id = %request_id, error = ?e, "Duplicate check failed");
+        }
+    }
+
+    Ok(())
 }
 
 /// Main upload file handler

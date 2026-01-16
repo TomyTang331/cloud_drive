@@ -8,8 +8,8 @@ const DEFAULT_MIN_CONNECTIONS: u32 = 1;
 const DEFAULT_JWT_EXPIRATION_HOURS: i64 = 24;
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_STORAGE_DIR: &str = "storage";
-const DEFAULT_MAX_UPLOAD_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1GB
-const DEFAULT_MAX_BATCH_DOWNLOAD_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1GB
+const DEFAULT_MAX_UPLOAD_SIZE: usize = 5 * 1024 * 1024 * 1024; // 5GB
+const DEFAULT_MAX_BATCH_DOWNLOAD_SIZE: usize = 5 * 1024 * 1024 * 1024; // 5GB
 const DEFAULT_COMPRESSION_THRESHOLD: usize = 256 * 1024 * 1024; // 256MB
 
 #[derive(Debug, Clone, Deserialize)]

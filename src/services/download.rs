@@ -51,12 +51,12 @@ pub async fn collect_files_to_download(
             let folder_name = file_entity.name.clone();
             let folder_path = file_entity.path.clone();
             let folder_files = collect_files_in_folder(db, &folder_path, user_id).await?;
-            
+
             // Mark all files as belonging to this root folder
             for file in &folder_files {
                 folder_roots.insert(file.id, (folder_name.clone(), folder_path.clone()));
             }
-            
+
             all_files.extend(folder_files);
         } else {
             // It's a file, add it directly (no folder root)
@@ -77,22 +77,25 @@ async fn collect_files_in_folder(
     owner_id: i32,
 ) -> Result<Vec<file::Model>> {
     let mut all_files = Vec::new();
+    let mut folders_to_process = vec![folder_path.to_string()];
 
-    // Find all files in this folder (matching path prefix)
-    let files = file::Entity::find()
-        .filter(file::Column::UserId.eq(owner_id))
-        .filter(file::Column::Path.starts_with(folder_path))
-        .all(db)
-        .await?;
+    while let Some(current_folder) = folders_to_process.pop() {
+        // Find all direct children of this folder
+        let children = file::Entity::find()
+            .filter(file::Column::UserId.eq(owner_id))
+            .filter(file::Column::ParentPath.eq(&current_folder))
+            .all(db)
+            .await?;
 
-    for file_entity in files {
-        // Skip the folder itself
-        if file_entity.file_type == "folder" {
-            continue;
+        for file_entity in children {
+            if file_entity.file_type == "folder" {
+                // Add subfolder to processing queue
+                folders_to_process.push(file_entity.path.clone());
+            } else {
+                // Add file to results
+                all_files.push(file_entity);
+            }
         }
-
-        // Only include actual files
-        all_files.push(file_entity);
     }
 
     Ok(all_files)
@@ -163,19 +166,21 @@ pub fn create_batch_download_zip(
         let physical_path = file_entity.storage_path.clone();
 
         // Determine the archive path based on whether this file belongs to a selected folder
-        let archive_path = if let Some((folder_name, folder_path)) = folder_roots.get(&file_entity.id) {
-            // This file belongs to a selected folder - preserve the folder structure
-            // Remove the folder_path prefix and add folder_name prefix
-            let relative_path = file_entity.path
-                .strip_prefix(folder_path)
-                .unwrap_or(&file_entity.path)
-                .trim_start_matches('/');
-            
-            format!("{}/{}", folder_name, relative_path)
-        } else {
-            // This is a directly selected file - use just the filename
-            file_entity.name.clone()
-        };
+        let archive_path =
+            if let Some((folder_name, folder_path)) = folder_roots.get(&file_entity.id) {
+                // This file belongs to a selected folder - preserve the folder structure
+                // Remove the folder_path prefix and add folder_name prefix
+                let relative_path = file_entity
+                    .path
+                    .strip_prefix(folder_path)
+                    .unwrap_or(&file_entity.path)
+                    .trim_start_matches('/');
+
+                format!("{}/{}", folder_name, relative_path)
+            } else {
+                // This is a directly selected file - use just the filename
+                file_entity.name.clone()
+            };
 
         file_paths.push((physical_path, archive_path));
     }

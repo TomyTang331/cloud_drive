@@ -82,6 +82,9 @@ async fn init_database(config: &Config) -> anyhow::Result<DatabaseConnection> {
     // Initialize tables
     db::init_database(&db).await?;
 
+    // Run database migrations
+    db::migrate_database(&db).await?;
+
     // Create indexes for optimal performance
     if let Err(e) = cloud_drive::db_indexes::create_composite_indexes(&db).await {
         tracing::warn!("Failed to create some indexes: {:?}", e);

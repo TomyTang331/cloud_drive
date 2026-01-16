@@ -34,6 +34,14 @@ pub struct Model {
     /// Physical storage path
     pub storage_path: String,
 
+    /// SHA-256 hash of file content (for deduplication)
+    #[sea_orm(nullable)]
+    pub file_hash: Option<String>,
+
+    /// Reference count for deduplication (how many files point to this storage)
+    #[sea_orm(default_value = 1)]
+    pub ref_count: i32,
+
     pub created_at: DateTime,
     pub updated_at: DateTime,
 }

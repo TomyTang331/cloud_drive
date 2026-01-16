@@ -115,12 +115,12 @@ pub async fn get_file(
         );
     }
 
-    // Read file from disk
+    // Open file for streaming
     let physical_path = PathBuf::from(&file_entity.storage_path);
-    let file_content = match tokio::fs::read(&physical_path).await {
-        Ok(content) => content,
+    let file = match tokio::fs::File::open(&physical_path).await {
+        Ok(f) => f,
         Err(e) => {
-            tracing::error!(request_id = %request_id, error = ?e, path = ?physical_path, "Failed to read file");
+            tracing::error!(request_id = %request_id, error = ?e, path = ?physical_path, "Failed to open file");
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
@@ -129,7 +129,21 @@ pub async fn get_file(
         }
     };
 
-    tracing::info!(request_id = %request_id, file_id = query.file_id, filename = %file_entity.name, "File downloaded successfully");
+    // Get file size
+    let file_size = file_entity.size_bytes.unwrap_or(0);
+
+    tracing::info!(
+        request_id = %request_id,
+        file_id = query.file_id,
+        filename = %file_entity.name,
+        size_bytes = file_size,
+        "Streaming file download"
+    );
+
+    // Create streaming body
+    use tokio_util::io::ReaderStream;
+    let stream = ReaderStream::new(file);
+    let body = axum::body::Body::from_stream(stream);
 
     // Return file with appropriate headers
     use axum::http::header;
@@ -143,11 +157,12 @@ pub async fn get_file(
     let encoded_filename = utf8_percent_encode(&file_entity.name, NON_ALPHANUMERIC).to_string();
 
     // Sanitize filename for legacy field
-    let safe_filename = file_entity.name.replace(['"', '\r', '\n'], "");
+    let safe_filename = file_entity.name.replace(['\"', '\r', '\n'], "");
 
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, file_size)
         .header(
             header::CONTENT_DISPOSITION,
             format!(
@@ -155,7 +170,7 @@ pub async fn get_file(
                 safe_filename, encoded_filename
             ),
         )
-        .body(axum::body::Body::from(file_content))
+        .body(body)
         .unwrap()
 }
 

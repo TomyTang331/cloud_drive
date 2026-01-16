@@ -361,24 +361,38 @@ pub async fn delete_file(
         }
     };
 
-    let physical_path = PathBuf::from(&file_entity.storage_path);
-    if physical_path.exists() {
-        let delete_result = if file_entity.file_type == "folder" {
-            std::fs::remove_dir_all(&physical_path)
-        } else {
-            std::fs::remove_file(&physical_path)
-        };
-
-        if let Err(e) = delete_result {
-            tracing::error!(request_id = %request_id, error = ?e, "Failed to delete physical file");
-            return error_resp(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                request_id,
-                "Failed to delete file",
-            );
+    // Check if we should delete physical file (for deduplicated files)
+    let should_delete_physical = if file_entity.file_type == "file" {
+        // Count how many files share the same physical storage
+        let storage_path = &file_entity.storage_path;
+        match file::Entity::find()
+            .filter(file::Column::StoragePath.eq(storage_path))
+            .all(&state.db)
+            .await
+        {
+            Ok(files) => {
+                let count = files.len();
+                tracing::info!(
+                    request_id = %request_id,
+                    file_id = query.file_id,
+                    storage_refs = count,
+                    "Checking storage references"
+                );
+                // Only delete physical file if this is the last reference
+                count <= 1
+            }
+            Err(e) => {
+                tracing::error!(request_id = %request_id, error = ?e, "Failed to check storage references");
+                // On error, assume we should delete to avoid orphaned files
+                true
+            }
         }
-    }
+    } else {
+        // Folders always delete physical content
+        true
+    };
 
+    // Delete database record first
     if let Err(e) = file::Entity::delete_by_id(query.file_id)
         .exec(&state.db)
         .await
@@ -388,6 +402,31 @@ pub async fn delete_file(
             StatusCode::INTERNAL_SERVER_ERROR,
             request_id,
             "Database error",
+        );
+    }
+
+    // Delete physical file/folder only if no other references exist
+    if should_delete_physical {
+        let physical_path = PathBuf::from(&file_entity.storage_path);
+        if physical_path.exists() {
+            let delete_result = if file_entity.file_type == "folder" {
+                std::fs::remove_dir_all(&physical_path)
+            } else {
+                std::fs::remove_file(&physical_path)
+            };
+
+            if let Err(e) = delete_result {
+                tracing::error!(request_id = %request_id, error = ?e, "Failed to delete physical file");
+                // Don't return error here since DB record is already deleted
+                tracing::warn!(request_id = %request_id, "Physical file deletion failed but DB record removed");
+            } else {
+                tracing::info!(request_id = %request_id, "Physical file deleted");
+            }
+        }
+    } else {
+        tracing::info!(
+            request_id = %request_id,
+            "Physical file preserved (shared by other files)"
         );
     }
 
