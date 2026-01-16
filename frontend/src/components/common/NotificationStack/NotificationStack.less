@@ -1,0 +1,38 @@
+.notification-stack {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column-reverse;
+    /* Stack from bottom up */
+    gap: 12px;
+    pointer-events: none;
+    /* Allow clicks to pass through container */
+    align-items: flex-end;
+    /* Align to right */
+    max-height: 100vh;
+    overflow: hidden;
+    padding: 10px;
+    /* Add some padding for shadows */
+}
+
+.notification-wrapper {
+    pointer-events: auto;
+    /* Re-enable clicks for items */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: slideInRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    width: fit-content;
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}

@@ -5,6 +5,9 @@ import { fileService, storageService } from '../services/api';
 import type { FileItem, StorageInfo } from '../types';
 import { useToast } from './useToast';
 
+import { useProgress } from '../context/ProgressContext';
+import { v4 as uuidv4 } from 'uuid';
+
 export const useFileOperations = () => {
     const [files, setFiles] = useState<FileItem[]>([]);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -12,6 +15,7 @@ export const useFileOperations = () => {
     const [loading, setLoading] = useState(false);
     const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
     const toast = useToast();
+    const { addTask, updateTask } = useProgress();
 
     const setCurrentPath = useCallback((path: string) => {
         setSearchParams({ path });
@@ -120,23 +124,52 @@ export const useFileOperations = () => {
         }
     };
 
+
     const uploadFiles = async (filesToUpload: FileList) => {
         if (!filesToUpload || filesToUpload.length === 0) return;
 
-        // Show uploading toast
-        toast.info(`Uploading ${filesToUpload.length} file(s)...`);
+        const filesArray = Array.from(filesToUpload);
+
+        // Create progress tasks for all files
+        const uploadTasks = filesArray.map(file => {
+            const id = uuidv4();
+            addTask({
+                id,
+                fileName: file.name,
+                type: 'upload',
+            });
+            return { id, file };
+        });
+
+
 
         try {
-            const filesArray = Array.from(filesToUpload);
-            await Promise.all(filesArray.map(file => fileService.uploadFile(file, currentPath)));
+            await Promise.all(uploadTasks.map(async ({ id, file }) => {
+                try {
+                    updateTask(id, { status: 'active' });
+                    await fileService.uploadFile(file, currentPath, (progress) => {
+                        updateTask(id, { progress });
+                    });
+                    updateTask(id, { status: 'completed', progress: 100 });
+                } catch (error) {
+                    console.error(`Upload failed for ${file.name}:`, error);
+                    updateTask(id, {
+                        status: 'error',
+                        error: error instanceof AxiosError ? error.response?.data?.message || 'Upload failed' : 'Upload failed'
+                    });
+                    throw error; // Re-throw to trigger toast error if needed, or handle individually
+                }
+            }));
+
             toast.success('Files uploaded successfully');
             fetchFiles(currentPath);
             fetchStorageInfo();
             return true;
         } catch (error) {
-            console.error('Upload failed:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Upload failed: ' + (message || 'Unknown error'));
+            console.error('Upload batch failed:', error);
+            // Individual errors are handled in the task, but we show a generic toast if something fails
+            // toast.error('Some uploads failed'); 
+            // Actually, let's not show a generic error toast if we have individual progress errors
             return false;
         }
     };
@@ -146,30 +179,47 @@ export const useFileOperations = () => {
 
         const isSingleFile = fileIds.length === 1;
         let fileType = 'file';
+        let fileName = 'download';
 
-        // Check if it's a single file and get its type
+        // Check if it's a single file and get its type/name
         if (isSingleFile) {
             const file = files.find(f => f.id === fileIds[0]);
             if (file) {
                 fileType = file.file_type;
+                fileName = file.name;
             }
+        } else {
+            fileName = `batch_download_${fileIds.length}_files.zip`;
         }
 
-        toast.info(`Preparing download for ${fileIds.length} file(s)...`);
+        const taskId = uuidv4();
+        addTask({
+            id: taskId,
+            fileName: fileName,
+            type: 'download',
+        });
+        updateTask(taskId, { status: 'active' });
+
+
 
         try {
             let response;
 
             // If single file (not folder), use direct download endpoint
             if (isSingleFile && fileType === 'file') {
-                response = await fileService.downloadFile(fileIds[0]);
+                response = await fileService.downloadFile(fileIds[0], (progress) => {
+                    updateTask(taskId, { progress });
+                });
             } else {
                 // Multiple files or a folder -> use batch download
+                // Batch download might not support progress well if backend doesn't send content-length for zip stream
+                // But we can try
                 response = await fileService.batchDownload(fileIds);
+                // For batch download, we might fake progress or just jump to 100
+                updateTask(taskId, { progress: 50 });
             }
 
             // Create a blob link to download
-            // response.data is already a Blob because responseType is 'blob'
             const blob = response.data;
             const url = window.URL.createObjectURL(blob);
 
@@ -177,45 +227,43 @@ export const useFileOperations = () => {
             link.href = url;
 
             // Try to get filename from content-disposition header
-            // Headers are case-insensitive in axios, but usually lowercase
             const contentDisposition = response.headers['content-disposition'];
-            let filename = `download_${new Date().getTime()}`;
+            let downloadFilename = fileName;
 
             if (contentDisposition) {
-                // Try to match filename* first (RFC 5987)
                 const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;\r\n]*)/i);
                 if (filenameStarMatch && filenameStarMatch[1]) {
-                    filename = decodeURIComponent(filenameStarMatch[1]);
+                    downloadFilename = decodeURIComponent(filenameStarMatch[1]);
                 } else {
-                    // Fallback to filename parameter
                     const filenameMatch = contentDisposition.match(/filename=['"]?([^;\r\n"']*)['\"]?/i);
                     if (filenameMatch && filenameMatch[1]) {
-                        filename = filenameMatch[1];
+                        downloadFilename = filenameMatch[1];
                     }
                 }
             }
 
-            // Fallback: Add extension if missing and we know it's a zip (batch/folder)
-            if ((!isSingleFile || fileType === 'folder') && !filename.endsWith('.zip')) {
-                filename += '.zip';
+            // Fallback extension
+            if ((!isSingleFile || fileType === 'folder') && !downloadFilename.endsWith('.zip')) {
+                downloadFilename += '.zip';
             }
 
-            link.setAttribute('download', filename);
+            // Update task name with actual filename
+            updateTask(taskId, { fileName: downloadFilename });
+
+            link.setAttribute('download', downloadFilename);
             document.body.appendChild(link);
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
 
-            // Success - download initiated
+            updateTask(taskId, { status: 'completed', progress: 100 });
             return true;
         } catch (error) {
             console.error('Download failed:', error);
             let message = 'Unknown error';
 
-            // Handle error message extraction for blob responses
             if (error instanceof AxiosError) {
                 if (error.response?.data instanceof Blob) {
-                    // If error response is a Blob, try to parse it as JSON
                     try {
                         const text = await error.response.data.text();
                         const jsonError = JSON.parse(text);
@@ -228,6 +276,7 @@ export const useFileOperations = () => {
                 }
             }
 
+            updateTask(taskId, { status: 'error', error: message });
             toast.error(`Download failed: ${message}`);
             return false;
         }
