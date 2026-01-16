@@ -52,6 +52,12 @@ interface DashboardModalsProps {
     // File Details
     detailsFiles: FileItem[];
     setDetailsFiles: (files: FileItem[]) => void;
+
+    // Selection
+    selectedCount?: number;
+
+    // Navigation
+    currentPath: string;
 }
 
 const DashboardModals: React.FC<DashboardModalsProps> = ({
@@ -84,7 +90,9 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
     videoFile,
     setVideoFile,
     detailsFiles,
-    setDetailsFiles
+    setDetailsFiles,
+    selectedCount = 0,
+    currentPath
 }) => {
     return (
         <>
@@ -146,7 +154,7 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
             <Modal
                 isOpen={showDeleteModal}
                 onClose={closeDeleteModal}
-                title="Delete Item?"
+                title={itemToDelete ? "Delete Item?" : "Delete Items?"}
                 icon={<div className="delete-icon">🗑️</div>}
                 footer={
                     <>
@@ -161,7 +169,11 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
                 className="delete-modal"
             >
                 <p>
-                    Are you sure you want to delete <strong>"{itemToDelete?.name}"</strong>?
+                    {itemToDelete ? (
+                        <>Are you sure you want to delete <strong>"{itemToDelete.name}"</strong>?</>
+                    ) : (
+                        <>Are you sure you want to delete <strong>{selectedCount}</strong> items?</>
+                    )}
                     <br />
                     This action cannot be undone.
                 </p>
@@ -175,6 +187,7 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
                 title={`Move "${itemToMove?.name}" to...`}
                 actionLabel="Move Here"
                 excludePath={itemToMove?.file_type === 'folder' ? itemToMove.path : undefined}
+                initialPath={currentPath}
             />
 
             {/* Copy File Modal */}
@@ -184,7 +197,10 @@ const DashboardModals: React.FC<DashboardModalsProps> = ({
                 onSelect={onCopy}
                 title={`Copy "${itemToCopy?.name}" to...`}
                 actionLabel="Copy Here"
+                initialPath={currentPath}
             />
+
+            {/* ... (other modals) ... */}
 
             {/* Image Preview Modal */}
             <ImagePreviewModal

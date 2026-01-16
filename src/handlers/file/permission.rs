@@ -114,7 +114,7 @@ pub async fn grant_permission(
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -171,7 +171,7 @@ pub async fn grant_permission(
                     error_resp(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         request_id,
-                        "Database error",
+                        "Database error occurred",
                     )
                 }
             }
@@ -201,7 +201,7 @@ pub async fn grant_permission(
                     error_resp(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         request_id,
-                        "Database error",
+                        "Database error occurred",
                     )
                 }
             }
@@ -211,7 +211,7 @@ pub async fn grant_permission(
             error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             )
         }
     }

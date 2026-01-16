@@ -38,8 +38,8 @@ export const useDashboardModals = () => {
         setNewName('');
     };
 
-    const openDeleteModal = (file: FileItem) => {
-        setItemToDelete(file);
+    const openDeleteModal = (file?: FileItem) => {
+        if (file) setItemToDelete(file);
         setShowDeleteModal(true);
     };
 

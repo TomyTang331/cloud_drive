@@ -11,31 +11,36 @@ import './App.less';
 import { ProgressProvider } from './context/ProgressContext';
 import NotificationStack from './components/common/NotificationStack/NotificationStack';
 
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/react-query';
+
 const App: React.FC = () => {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <ProgressProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<SignUp />} />
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="/" element={<Navigate to="/login" replace />} />
-              <Route path="*" element={<Navigate to="/login" replace />} />
-            </Routes>
-            <NotificationStack />
-          </BrowserRouter>
-        </ProgressProvider>
-      </AuthProvider>
-    </ToastProvider>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <AuthProvider>
+          <ProgressProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/signup" element={<SignUp />} />
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="/" element={<Navigate to="/login" replace />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
+              </Routes>
+              <NotificationStack />
+            </BrowserRouter>
+          </ProgressProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </QueryClientProvider>
   );
 };
 

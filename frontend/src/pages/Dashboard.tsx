@@ -33,6 +33,7 @@ const Dashboard: React.FC = () => {
         moveFile,
         copyFile,
         deleteFile,
+        batchDeleteFiles,
         uploadFiles,
         batchDownloadFiles,
         setCurrentPath
@@ -100,7 +101,6 @@ const Dashboard: React.FC = () => {
         clearSelection();
     }, [selectedCategory, searchQuery, sortBy, currentPath, clearSelection]);
 
-    // Handle context menu
     const handleContextMenu = (e: React.MouseEvent, file?: FileItem) => {
         e.preventDefault();
         setContextMenu({
@@ -111,7 +111,6 @@ const Dashboard: React.FC = () => {
         });
     };
 
-    // Close context menu on click
     useEffect(() => {
         const handleClick = () => {
             setContextMenu(null);
@@ -120,12 +119,10 @@ const Dashboard: React.FC = () => {
         return () => document.removeEventListener('click', handleClick);
     }, [setContextMenu]);
 
-    // Memoize images for preview navigation
     const previewImages = React.useMemo(() => {
         return processedFiles.filter(f => f.mime_type?.startsWith('image/'));
     }, [processedFiles]);
 
-    // Create folder
     const handleCreateFolder = async () => {
         const success = await createFolder(newFolderName);
         if (success) {
@@ -134,7 +131,6 @@ const Dashboard: React.FC = () => {
         }
     };
 
-    // Handle file/folder click
     const handleFileClick = (file: FileItem) => {
         if (file.file_type === 'folder') {
             setCurrentPath(file.path);
@@ -202,34 +198,30 @@ const Dashboard: React.FC = () => {
         }
     }, [searchParams, files, previewFile, videoFile, setPreviewFile, setVideoFile]);
 
-    // Rename File
     const handleRename = async () => {
         if (!renameFileState) return;
-        const success = await renameFile(renameFileState, newName);
+        const success = await renameFile(renameFileState.id, newName);
         if (success) {
             closeRenameModal();
         }
     };
 
-    // Move File
     const handleMove = async (destinationPath: string) => {
         if (!itemToMove) return;
-        const success = await moveFile(itemToMove, destinationPath);
+        const success = await moveFile(itemToMove.id, destinationPath);
         if (success) {
             closeMoveModal();
         }
     };
 
-    // Copy File
     const handleCopy = async (destinationPath: string) => {
         if (!itemToCopy) return;
-        const success = await copyFile(itemToCopy, destinationPath);
+        const success = await copyFile(itemToCopy.id, destinationPath);
         if (success) {
             closeCopyModal();
         }
     };
 
-    // Details
     const handleDetails = (file?: FileItem) => {
         if (file) {
             // If the file is part of the current selection and we have multiple items selected,
@@ -238,7 +230,6 @@ const Dashboard: React.FC = () => {
                 const selectedFiles = processedFiles.filter(f => selectedIds.has(f.id));
                 setDetailsFiles(selectedFiles);
             } else {
-                // Otherwise just show details for the single file
                 setDetailsFiles([file]);
             }
         } else if (selectedIds.size > 0) {
@@ -247,39 +238,45 @@ const Dashboard: React.FC = () => {
         }
     };
 
-    // Download File
     const handleDownload = (file: FileItem) => {
-        // If the file is part of the current selection and we have multiple items selected,
-        // download all selected items.
         if (selectedIds.has(file.id) && selectedIds.size > 1) {
             batchDownloadFiles(Array.from(selectedIds));
         } else {
-            // Otherwise just download the single file (even if others are selected, 
-            // usually right-clicking an unselected item implies acting on just that one,
-            // or the selection logic should have updated. But here we play it safe).
             batchDownloadFiles([file.id]);
         }
     };
 
-    // Delete file/folder - Show confirmation
     const handleDelete = (file: FileItem) => {
         if (!file.can_delete) {
             toast.error('You don\'t have permission to delete this file');
             return;
         }
-        openDeleteModal(file);
-    };
 
-    // Confirm delete
-    const confirmDelete = async () => {
-        if (!itemToDelete) return;
-        const success = await deleteFile(itemToDelete);
-        if (success) {
-            closeDeleteModal();
+        if (selectedIds.has(file.id) && selectedIds.size > 1) {
+            openDeleteModal();
+        } else {
+            openDeleteModal(file);
         }
     };
 
-    // Handle File Upload
+    const confirmDelete = async () => {
+        if (itemToDelete) {
+            const success = await deleteFile(itemToDelete.id);
+            if (success) {
+                closeDeleteModal();
+                if (selectedIds.has(itemToDelete.id)) {
+                    handleSelect(itemToDelete.id, true);
+                }
+            }
+        } else if (selectedIds.size > 0) {
+            const success = await batchDeleteFiles(Array.from(selectedIds));
+            if (success) {
+                closeDeleteModal();
+                clearSelection();
+            }
+        }
+    };
+
     const handleFileUpload = async (filesToUpload: FileList | null) => {
         if (!filesToUpload) return;
         await uploadFiles(filesToUpload);
@@ -338,9 +335,7 @@ const Dashboard: React.FC = () => {
                     onNewFolder={() => setShowCreateFolder(true)}
                     onDelete={() => {
                         if (selectedIds.size > 0) {
-                            // TODO: Implement batch delete
-                            const fileToDelete = processedFiles.find(f => selectedIds.has(f.id));
-                            if (fileToDelete) handleDelete(fileToDelete);
+                            openDeleteModal();
                         }
                     }}
                     onDownload={() => {
@@ -489,6 +484,8 @@ const Dashboard: React.FC = () => {
                     }}
                     detailsFiles={detailsFiles}
                     setDetailsFiles={setDetailsFiles}
+                    selectedCount={selectedIds.size}
+                    currentPath={currentPath}
                 />
             </main>
         </div>

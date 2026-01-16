@@ -1,136 +1,110 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AxiosError } from 'axios';
-import { fileService, storageService } from '../services/api';
-import type { FileItem, StorageInfo } from '../types';
+import { useQueryClient } from '@tanstack/react-query';
+import { fileService } from '../services/api';
 import { useToast } from './useToast';
-
 import { useProgress } from '../context/ProgressContext';
 import { v4 as uuidv4 } from 'uuid';
+import { AxiosError } from 'axios';
+
+import { useFilesQuery, useStorageQuery } from './queries/useFiles';
+import {
+    useCreateFolderMutation,
+    useDeleteFileMutation,
+    useBatchDeleteMutation,
+    useRenameFileMutation,
+    useMoveFileMutation,
+    useCopyFileMutation
+} from './mutations/useFileMutations';
 
 export const useFileOperations = () => {
-    const [files, setFiles] = useState<FileItem[]>([]);
     const [searchParams, setSearchParams] = useSearchParams();
     const currentPath = searchParams.get('path') || '/';
-    const [loading, setLoading] = useState(false);
-    const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
     const toast = useToast();
     const { addTask, updateTask } = useProgress();
+    const queryClient = useQueryClient();
+
+    const { data: files = [], isLoading: loading, refetch: refetchFiles } = useFilesQuery(currentPath);
+    const { data: storageInfo = null, refetch: fetchStorageInfo } = useStorageQuery();
+
+    const createFolderMutation = useCreateFolderMutation();
+    const deleteFileMutation = useDeleteFileMutation();
+    const batchDeleteMutation = useBatchDeleteMutation();
+    const renameFileMutation = useRenameFileMutation();
+    const moveFileMutation = useMoveFileMutation();
+    const copyFileMutation = useCopyFileMutation();
 
     const setCurrentPath = useCallback((path: string) => {
         setSearchParams({ path });
     }, [setSearchParams]);
 
-    const fetchFiles = useCallback(async (path: string) => {
-        setLoading(true);
-        try {
-            const response = await fileService.listFiles(path);
-            setFiles(response.data.data.files);
-            // Only update if path is different to avoid loops/redundant updates
-            if (response.data.data.current_path !== path) {
-                setSearchParams({ path: response.data.data.current_path });
-            }
-        } catch (error) {
-            console.error('Failed to fetch files:', error);
-            if (error instanceof AxiosError && error.response?.status === 401) {
-                console.error('Authentication failed');
-            } else {
-                toast.error('Failed to load files');
-            }
-        } finally {
-            setLoading(false);
+    const fetchFiles = useCallback((path?: string) => {
+        if (path && path !== currentPath) {
+            setCurrentPath(path);
+        } else {
+            refetchFiles();
         }
-    }, [toast, setSearchParams]);
-
-    const fetchStorageInfo = useCallback(async () => {
-        try {
-            const response = await storageService.getStorageInfo();
-            setStorageInfo(response.data.data);
-        } catch (error) {
-            console.error('Failed to fetch storage info:', error);
-        }
-    }, []);
+    }, [currentPath, setCurrentPath, refetchFiles]);
 
     const createFolder = async (name: string) => {
-        if (!name.trim()) return;
         try {
-            await fileService.createFolder(currentPath, name);
-            toast.success('Folder created successfully');
-            fetchFiles(currentPath);
+            await createFolderMutation.mutateAsync({ path: currentPath, name });
             return true;
         } catch (error) {
-            console.error('Failed to create folder:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Failed to create folder: ' + (message || 'Unknown error'));
             return false;
         }
     };
 
-    const renameFile = async (file: FileItem, newName: string) => {
-        if (!newName.trim()) return false;
+    const renameFile = async (fileId: number, newName: string) => {
         try {
-            await fileService.renameFile(file.id, newName);
-            toast.success('File renamed successfully');
-            fetchFiles(currentPath);
+            await renameFileMutation.mutateAsync({ fileId, newName });
             return true;
         } catch (error) {
-            console.error('Failed to rename:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Rename failed: ' + (message || 'Unknown error'));
             return false;
         }
     };
 
-    const moveFile = async (file: FileItem, destinationPath: string) => {
+    const moveFile = async (fileId: number, destinationPath: string) => {
         try {
-            await fileService.moveFile(file.id, destinationPath);
-            toast.success('File moved successfully');
-            fetchFiles(currentPath);
+            await moveFileMutation.mutateAsync({ fileId, destinationPath });
             return true;
         } catch (error) {
-            console.error('Failed to move file:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Move failed: ' + (message || 'Unknown error'));
             return false;
         }
     };
 
-    const copyFile = async (file: FileItem, destinationPath: string) => {
+    const copyFile = async (fileId: number, destinationPath: string) => {
         try {
-            await fileService.copyFile(file.id, destinationPath);
-            toast.success('File copied successfully');
-            fetchFiles(currentPath);
+            await copyFileMutation.mutateAsync({ fileId, destinationPath });
             return true;
         } catch (error) {
-            console.error('Failed to copy file:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Copy failed: ' + (message || 'Unknown error'));
             return false;
         }
     };
 
-    const deleteFile = async (file: FileItem) => {
+    const deleteFile = async (fileId: number) => {
         try {
-            await fileService.deleteFile(file.id);
-            toast.success('File deleted successfully');
-            fetchFiles(currentPath);
-            fetchStorageInfo(); // Update storage after delete
+            await deleteFileMutation.mutateAsync(fileId);
             return true;
         } catch (error) {
-            console.error('Failed to delete file:', error);
-            const message = error instanceof AxiosError ? error.response?.data?.message : 'Unknown error';
-            toast.error('Delete failed: ' + (message || 'Unknown error'));
             return false;
         }
     };
 
+    const batchDeleteFiles = async (fileIds: number[]) => {
+        try {
+            await batchDeleteMutation.mutateAsync(fileIds);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    };
 
     const uploadFiles = async (filesToUpload: FileList) => {
         if (!filesToUpload || filesToUpload.length === 0) return;
 
         const filesArray = Array.from(filesToUpload);
 
-        // Create progress tasks for all files
         const uploadTasks = filesArray.map(file => {
             const id = uuidv4();
             addTask({
@@ -140,8 +114,6 @@ export const useFileOperations = () => {
             });
             return { id, file };
         });
-
-
 
         try {
             await Promise.all(uploadTasks.map(async ({ id, file }) => {
@@ -157,19 +129,16 @@ export const useFileOperations = () => {
                         status: 'error',
                         error: error instanceof AxiosError ? error.response?.data?.message || 'Upload failed' : 'Upload failed'
                     });
-                    throw error; // Re-throw to trigger toast error if needed, or handle individually
+                    throw error;
                 }
             }));
 
             toast.success('Files uploaded successfully');
-            fetchFiles(currentPath);
-            fetchStorageInfo();
+            queryClient.invalidateQueries({ queryKey: ['files', currentPath] });
+            queryClient.invalidateQueries({ queryKey: ['storage'] });
             return true;
         } catch (error) {
             console.error('Upload batch failed:', error);
-            // Individual errors are handled in the task, but we show a generic toast if something fails
-            // toast.error('Some uploads failed'); 
-            // Actually, let's not show a generic error toast if we have individual progress errors
             return false;
         }
     };
@@ -181,7 +150,6 @@ export const useFileOperations = () => {
         let fileType = 'file';
         let fileName = 'download';
 
-        // Check if it's a single file and get its type/name
         if (isSingleFile) {
             const file = files.find(f => f.id === fileIds[0]);
             if (file) {
@@ -200,33 +168,26 @@ export const useFileOperations = () => {
         });
         updateTask(taskId, { status: 'active' });
 
-
-
         try {
             let response;
 
-            // If single file (not folder), use direct download endpoint
             if (isSingleFile && fileType === 'file') {
                 response = await fileService.downloadFile(fileIds[0], (progress) => {
                     updateTask(taskId, { progress });
                 });
             } else {
-                // Multiple files or a folder -> use batch download
-                // Batch download might not support progress well if backend doesn't send content-length for zip stream
-                // But we can try
                 response = await fileService.batchDownload(fileIds);
-                // For batch download, we might fake progress or just jump to 100
-                updateTask(taskId, { progress: 50 });
+                updateTask(taskId, { progress: 50 }); // Indeterminate state or fake progress
             }
 
-            // Create a blob link to download
+            // Create blob link to download
             const blob = response.data;
             const url = window.URL.createObjectURL(blob);
 
             const link = document.createElement('a');
             link.href = url;
 
-            // Try to get filename from content-disposition header
+            // Try to get filename from content-disposition
             const contentDisposition = response.headers['content-disposition'];
             let downloadFilename = fileName;
 
@@ -235,19 +196,18 @@ export const useFileOperations = () => {
                 if (filenameStarMatch && filenameStarMatch[1]) {
                     downloadFilename = decodeURIComponent(filenameStarMatch[1]);
                 } else {
-                    const filenameMatch = contentDisposition.match(/filename=['"]?([^;\r\n"']*)['\"]?/i);
+                    const filenameMatch = contentDisposition.match(/filename=['"]?([^;\r\n"']*)['"]?/i);
                     if (filenameMatch && filenameMatch[1]) {
                         downloadFilename = filenameMatch[1];
                     }
                 }
             }
 
-            // Fallback extension
+            // Ensure zip extension for folders/batch
             if ((!isSingleFile || fileType === 'folder') && !downloadFilename.endsWith('.zip')) {
                 downloadFilename += '.zip';
             }
 
-            // Update task name with actual filename
             updateTask(taskId, { fileName: downloadFilename });
 
             link.setAttribute('download', downloadFilename);
@@ -264,6 +224,7 @@ export const useFileOperations = () => {
 
             if (error instanceof AxiosError) {
                 if (error.response?.data instanceof Blob) {
+                    // Convert blob error to text
                     try {
                         const text = await error.response.data.text();
                         const jsonError = JSON.parse(text);
@@ -282,25 +243,26 @@ export const useFileOperations = () => {
         }
     };
 
-    // Initial fetch and navigation
-    useEffect(() => {
-        fetchFiles(currentPath);
-        fetchStorageInfo();
-    }, [currentPath, fetchFiles, fetchStorageInfo]);
+    const downloadFile = async (fileId: number) => {
+        return batchDownloadFiles([fileId]);
+    };
 
     return {
         files,
-        currentPath,
         loading,
-        storageInfo,
-        fetchFiles: () => fetchFiles(currentPath), // Expose a version that uses currentPath
+        currentPath,
+        setCurrentPath,
+        fetchFiles,
         createFolder,
+        deleteFile,
+        batchDeleteFiles,
+        downloadFile,
+        uploadFiles,
+        batchDownloadFiles,
         renameFile,
         moveFile,
         copyFile,
-        deleteFile,
-        uploadFiles,
-        batchDownloadFiles,
-        setCurrentPath // Exposed for navigation
+        storageInfo,
+        fetchStorageInfo
     };
 };

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod constants;
 pub mod db;
 pub mod db_indexes;
 pub mod entities;

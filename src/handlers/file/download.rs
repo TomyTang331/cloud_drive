@@ -295,7 +295,11 @@ pub async fn batch_download_files(State(state): State<AppState>, request: Reques
         }
         Err(e) => {
             tracing::error!(request_id = %request_id, error = %e, "Single file check failed");
-            return error_resp(StatusCode::FORBIDDEN, request_id, &e.to_string());
+            return error_resp(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                request_id,
+                "Internal server error",
+            );
         }
     }
 
@@ -313,7 +317,7 @@ pub async fn batch_download_files(State(state): State<AppState>, request: Reques
             return error_resp(
                 StatusCode::BAD_REQUEST,
                 request_id,
-                &format!("Failed to collect files: {}", e),
+                "Failed to collect files",
             );
         }
     };
@@ -371,11 +375,7 @@ pub async fn batch_download_files(State(state): State<AppState>, request: Reques
         }
         Err(e) => {
             tracing::error!(request_id = %request_id, error = %e, "Permission check failed");
-            return error_resp(
-                StatusCode::FORBIDDEN,
-                request_id,
-                &format!("Permission denied: {}", e),
-            );
+            return error_resp(StatusCode::FORBIDDEN, request_id, "Permission denied");
         }
     }
 
@@ -399,7 +399,7 @@ pub async fn batch_download_files(State(state): State<AppState>, request: Reques
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                &format!("Failed to create ZIP archive: {}", e),
+                &format!("Failed to create ZIP archive"),
             );
         }
         Err(e) => {

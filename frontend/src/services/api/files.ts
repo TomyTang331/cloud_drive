@@ -2,19 +2,15 @@ import api from './client';
 import type { ApiResponse, FileListResponse, FileItem, CalculateSizeResponse } from '../../types';
 
 export const fileService = {
-    // List files
     listFiles: (path: string = '/') =>
         api.get<ApiResponse<FileListResponse>>(`/api/files?path=${encodeURIComponent(path)}`),
 
-    // Create folder
     createFolder: (path: string, name: string) =>
         api.post<ApiResponse<unknown>>('/api/files/folder', { path, name }),
 
-    // Delete file/folder
     deleteFile: (fileId: number) =>
         api.delete<ApiResponse<unknown>>(`/api/files?file_id=${fileId}`),
 
-    // Download file
     downloadFile: (fileId: number, onProgress?: (progress: number) => void) =>
         api.get(`/api/files/download?file_id=${fileId}`, {
             responseType: 'blob',
@@ -26,7 +22,6 @@ export const fileService = {
             }
         }),
 
-    // Upload file
     uploadFile: (file: File, path: string = '/', onProgress?: (progress: number) => void) => {
         const formData = new FormData();
         formData.append('path', path);
@@ -44,23 +39,18 @@ export const fileService = {
         });
     },
 
-    // Batch download files
     batchDownload: (fileIds: number[]) =>
         api.post('/api/files/batch-download', { file_ids: fileIds }, { responseType: 'blob' }),
 
-    // Rename file
     renameFile: (fileId: number, newName: string) =>
         api.put<ApiResponse<FileItem>>('/api/files/rename', { file_id: fileId, new_name: newName }),
 
-    // Move file
     moveFile: (fileId: number, destinationPath: string) =>
         api.put<ApiResponse<FileItem>>('/api/files/move', { file_id: fileId, destination_path: destinationPath }),
 
-    // Copy file
     copyFile: (fileId: number, destinationPath: string) =>
         api.post<ApiResponse<FileItem>>('/api/files/copy', { file_id: fileId, destination_path: destinationPath }),
 
-    // Calculate total size of selected files/folders
     calculateSize: (fileIds: number[]) =>
         api.post<ApiResponse<CalculateSizeResponse>>('/api/files/size', { file_ids: fileIds }),
 };

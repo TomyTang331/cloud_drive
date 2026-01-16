@@ -264,7 +264,7 @@ pub async fn create_folder(State(state): State<AppState>, request: Request) -> R
             error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                " Database error",
+                "Database error occurred",
             )
         }
     }
@@ -312,7 +312,7 @@ pub async fn delete_file(
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -356,41 +356,14 @@ pub async fn delete_file(
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
 
-    // Check if we should delete physical file (for deduplicated files)
-    let should_delete_physical = if file_entity.file_type == "file" {
-        // Count how many files share the same physical storage
-        let storage_path = &file_entity.storage_path;
-        match file::Entity::find()
-            .filter(file::Column::StoragePath.eq(storage_path))
-            .all(&state.db)
-            .await
-        {
-            Ok(files) => {
-                let count = files.len();
-                tracing::info!(
-                    request_id = %request_id,
-                    file_id = query.file_id,
-                    storage_refs = count,
-                    "Checking storage references"
-                );
-                // Only delete physical file if this is the last reference
-                count <= 1
-            }
-            Err(e) => {
-                tracing::error!(request_id = %request_id, error = ?e, "Failed to check storage references");
-                // On error, assume we should delete to avoid orphaned files
-                true
-            }
-        }
-    } else {
-        // Folders always delete physical content
-        true
-    };
+    // Store the storage path before deleting the record
+    let storage_path = file_entity.storage_path.clone();
+    let file_type = file_entity.file_type.clone();
 
     // Delete database record first
     if let Err(e) = file::Entity::delete_by_id(query.file_id)
@@ -401,15 +374,62 @@ pub async fn delete_file(
         return error_resp(
             StatusCode::INTERNAL_SERVER_ERROR,
             request_id,
-            "Database error",
+            "Database error occurred",
         );
     }
 
+    // After deleting the record, check if any other files still reference this physical file
+    let should_delete_physical = if file_type == "file" {
+        // Normalize storage_path for comparison (database uses forward slashes)
+        let normalized_storage_path = storage_path.replace('\\', "/");
+
+        match file::Entity::find()
+            .filter(file::Column::StoragePath.eq(&normalized_storage_path))
+            .all(&state.db)
+            .await
+        {
+            Ok(remaining_files) => {
+                let count = remaining_files.len();
+                tracing::info!(
+                    request_id = %request_id,
+                    file_id = query.file_id,
+                    storage_path = %normalized_storage_path,
+                    remaining_refs = count,
+                    "Checking remaining storage references after deletion"
+                );
+
+                if count > 0 {
+                    tracing::info!(
+                        request_id = %request_id,
+                        remaining_files = ?remaining_files.iter().map(|f| (f.id, &f.name)).collect::<Vec<_>>(),
+                        "Files still referencing this storage"
+                    );
+                }
+
+                // Only delete physical file if no other files reference it
+                count == 0
+            }
+            Err(e) => {
+                tracing::error!(request_id = %request_id, error = ?e, "Failed to check storage references");
+                // On error, be conservative and don't delete to avoid data loss
+                false
+            }
+        }
+    } else {
+        // Folders always delete physical content
+        true
+    };
+
     // Delete physical file/folder only if no other references exist
     if should_delete_physical {
-        let physical_path = PathBuf::from(&file_entity.storage_path);
+        // Convert storage_path to OS-specific path for file system operations
+        let physical_path = if cfg!(windows) {
+            PathBuf::from(storage_path.replace('/', "\\"))
+        } else {
+            PathBuf::from(&storage_path)
+        };
         if physical_path.exists() {
-            let delete_result = if file_entity.file_type == "folder" {
+            let delete_result = if file_type == "folder" {
                 std::fs::remove_dir_all(&physical_path)
             } else {
                 std::fs::remove_file(&physical_path)
@@ -505,7 +525,7 @@ pub async fn rename_file(State(state): State<AppState>, request: Request) -> Res
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -546,7 +566,7 @@ pub async fn rename_file(State(state): State<AppState>, request: Request) -> Res
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -598,7 +618,7 @@ pub async fn rename_file(State(state): State<AppState>, request: Request) -> Res
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -699,7 +719,7 @@ pub async fn move_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -740,7 +760,7 @@ pub async fn move_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -800,7 +820,7 @@ pub async fn move_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -907,7 +927,7 @@ pub async fn copy_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -948,7 +968,7 @@ pub async fn copy_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -1032,7 +1052,7 @@ pub async fn copy_file(State(state): State<AppState>, request: Request) -> Respo
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -1134,7 +1154,7 @@ pub async fn calculate_size(
             return error_resp(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 request_id,
-                "Database error",
+                "Database error occurred",
             );
         }
     };
@@ -1152,7 +1172,7 @@ pub async fn calculate_size(
                 return error_resp(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     request_id,
-                    "Database error",
+                    "Database error occurred",
                 );
             }
         };

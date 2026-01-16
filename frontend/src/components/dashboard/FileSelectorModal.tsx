@@ -13,6 +13,7 @@ interface FileSelectorModalProps {
     title: string;
     actionLabel: string;
     excludePath?: string; // Path to exclude (e.g. moving a folder into itself)
+    initialPath?: string;
 }
 
 const FileSelectorModal: React.FC<FileSelectorModalProps> = ({
@@ -21,20 +22,21 @@ const FileSelectorModal: React.FC<FileSelectorModalProps> = ({
     onSelect,
     title,
     actionLabel,
-    excludePath
+    excludePath,
+    initialPath = '/'
 }) => {
-    const [currentPath, setCurrentPath] = useState('/');
+    const [currentPath, setCurrentPath] = useState(initialPath);
     const [folders, setFolders] = useState<FileItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
     useEffect(() => {
         if (isOpen) {
-            setCurrentPath('/');
+            setCurrentPath(initialPath);
             setSelectedPath(null);
-            loadFolders('/');
+            loadFolders(initialPath);
         }
-    }, [isOpen]);
+    }, [isOpen, initialPath]);
 
     const loadFolders = async (path: string) => {
         setLoading(true);
@@ -126,6 +128,18 @@ const FileSelectorModal: React.FC<FileSelectorModalProps> = ({
                         <div className="loading">Loading...</div>
                     ) : (
                         <>
+                            {currentPath !== '/' && (
+                                <div
+                                    className="folder-item parent-folder"
+                                    onClick={handleBack}
+                                >
+                                    <div className="folder-icon">
+                                        📁
+                                    </div>
+                                    <span className="folder-name">.. (Go Up)</span>
+                                </div>
+                            )}
+
                             {folders.length === 0 ? (
                                 <div className="empty-folder">No subfolders</div>
                             ) : (
@@ -153,7 +167,7 @@ const FileSelectorModal: React.FC<FileSelectorModalProps> = ({
                 </div>
 
                 <div className="selector-footer-info">
-                    Selected: {selectedPath ? selectedPath.split('/').pop() : 'Current Folder'}
+                    Target: <strong>{selectedPath || currentPath}</strong>
                 </div>
             </div>
         </Modal>
